@@ -47,6 +47,7 @@ func (*retrySuite) TestCalledOnceEvenIfStopped(c *gc.C) {
 	stop := make(chan struct{})
 	clock := &mockClock{}
 	called := false
+	close(stop)
 	err := retry.Call(retry.CallArgs{
 		Func: func() error {
 			called = true
@@ -55,7 +56,6 @@ func (*retrySuite) TestCalledOnceEvenIfStopped(c *gc.C) {
 		Clock: clock,
 		Stop:  stop,
 	})
-	close(stop)
 	c.Assert(called, jc.IsTrue)
 	c.Assert(err, jc.ErrorIsNil)
 	c.Assert(clock.delays, gc.HasLen, 0)
@@ -98,7 +98,6 @@ func (*retrySuite) TestBackoffFactor(c *gc.C) {
 	})
 	c.Assert(err, jc.Satisfies, retry.IsRetryCountExceeded)
 	c.Assert(err, gc.ErrorMatches, `retry count exceeded: bah`)
-	c.Assert(clock.delays, gc.HasLen, 4)
 	c.Assert(clock.delays, gc.DeepEquals, []time.Duration{
 		retry.DefaultDelay,
 		retry.DefaultDelay * 2,
@@ -125,4 +124,29 @@ func (*retrySuite) TestStopChannel(c *gc.C) {
 	})
 	c.Assert(err, jc.Satisfies, retry.IsRetryStopped)
 	c.Assert(clock.delays, gc.HasLen, 3)
+}
+
+func (*retrySuite) TestNotifyFunc(c *gc.C) {
+	var (
+		clock      = &mockClock{}
+		funcErr    = errors.New("bah")
+		retries    []int
+		funcErrors []error
+	)
+	err := retry.Call(retry.CallArgs{
+		Func: func() error {
+			return funcErr
+		},
+		NotifyFunc: func(lastError error, retry int) {
+			funcErrors = append(funcErrors, lastError)
+			retries = append(retries, retry)
+		},
+		RetryCount:    3,
+		BackoffFactor: 2,
+		Clock:         clock,
+	})
+	c.Assert(err, jc.Satisfies, retry.IsRetryCountExceeded)
+	c.Assert(clock.delays, gc.HasLen, 3)
+	c.Assert(funcErrors, gc.DeepEquals, []error{funcErr, funcErr, funcErr})
+	c.Assert(retries, gc.DeepEquals, []int{1, 2, 3})
 }
