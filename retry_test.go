@@ -67,29 +67,40 @@ func (*retrySuite) TestDefaultRetries(c *gc.C) {
 		Func:  func() error { return errors.New("bah") },
 		Clock: clock,
 	})
-	c.Assert(errors.Cause(err), jc.Satisfies, retry.IsRetryAttemptsExceeded)
-	c.Assert(clock.delays, gc.HasLen, retry.DefaultRetryAttempts)
+	c.Assert(errors.Cause(err), jc.Satisfies, retry.IsAttemptsExceeded)
+	// We delay between attempts, and don't delay after the last one.
+	c.Assert(clock.delays, gc.HasLen, retry.DefaultAttempts-1)
 }
 
-func (*retrySuite) TestFailureRetries(c *gc.C) {
+func (*retrySuite) TestAttempts(c *gc.C) {
 	clock := &mockClock{}
 	funcErr := errors.New("bah")
 	err := retry.Call(retry.CallArgs{
-		Func:          func() error { return funcErr },
-		RetryAttempts: 4,
-		Clock:         clock,
+		Func:     func() error { return funcErr },
+		Attempts: 4,
+		Clock:    clock,
 	})
-	c.Assert(err, gc.ErrorMatches, `retry count exceeded: bah`)
+	c.Assert(errors.Cause(err), jc.Satisfies, retry.IsAttemptsExceeded)
+	// We delay between attempts, and don't delay after the last one.
+	c.Assert(clock.delays, jc.DeepEquals, []time.Duration{
+		retry.DefaultDelay,
+		retry.DefaultDelay,
+		retry.DefaultDelay,
+	})
+}
+
+func (*retrySuite) TestAttemptsExceededError(c *gc.C) {
+	clock := &mockClock{}
+	funcErr := errors.New("bah")
+	err := retry.Call(retry.CallArgs{
+		Func:  func() error { return funcErr },
+		Clock: clock,
+	})
+	c.Assert(err, gc.ErrorMatches, `attempt count exceeded: bah`)
 	cause := errors.Cause(err)
-	c.Assert(cause, jc.Satisfies, retry.IsRetryAttemptsExceeded)
-	retryError, _ := cause.(*retry.RetryAttemptsExceeded)
+	c.Assert(cause, jc.Satisfies, retry.IsAttemptsExceeded)
+	retryError, _ := cause.(*retry.AttemptsExceeded)
 	c.Assert(retryError.LastError, gc.Equals, funcErr)
-	c.Assert(clock.delays, gc.DeepEquals, []time.Duration{
-		retry.DefaultDelay,
-		retry.DefaultDelay,
-		retry.DefaultDelay,
-		retry.DefaultDelay,
-	})
 }
 
 func (*retrySuite) TestFatalErrorsNotRetried(c *gc.C) {
@@ -108,12 +119,11 @@ func (*retrySuite) TestBackoffFactor(c *gc.C) {
 	clock := &mockClock{}
 	err := retry.Call(retry.CallArgs{
 		Func:          func() error { return errors.New("bah") },
-		RetryAttempts: 4,
 		Clock:         clock,
 		BackoffFactor: 2,
 	})
-	c.Assert(errors.Cause(err), jc.Satisfies, retry.IsRetryAttemptsExceeded)
-	c.Assert(clock.delays, gc.DeepEquals, []time.Duration{
+	c.Assert(errors.Cause(err), jc.Satisfies, retry.IsAttemptsExceeded)
+	c.Assert(clock.delays, jc.DeepEquals, []time.Duration{
 		retry.DefaultDelay,
 		retry.DefaultDelay * 2,
 		retry.DefaultDelay * 4,
@@ -133,9 +143,8 @@ func (*retrySuite) TestStopChannel(c *gc.C) {
 			count++
 			return errors.New("bah")
 		},
-		RetryAttempts: 5,
-		Clock:         clock,
-		Stop:          stop,
+		Clock: clock,
+		Stop:  stop,
 	})
 	c.Assert(errors.Cause(err), jc.Satisfies, retry.IsRetryStopped)
 	c.Assert(clock.delays, gc.HasLen, 3)
@@ -145,25 +154,24 @@ func (*retrySuite) TestNotifyFunc(c *gc.C) {
 	var (
 		clock      = &mockClock{}
 		funcErr    = errors.New("bah")
-		retries    []int
+		attempts   []int
 		funcErrors []error
 	)
 	err := retry.Call(retry.CallArgs{
 		Func: func() error {
 			return funcErr
 		},
-		NotifyFunc: func(lastError error, retry int) {
+		NotifyFunc: func(lastError error, attempt int) {
 			funcErrors = append(funcErrors, lastError)
-			retries = append(retries, retry)
+			attempts = append(attempts, attempt)
 		},
-		RetryAttempts: 3,
-		BackoffFactor: 2,
-		Clock:         clock,
+		Attempts: 3,
+		Clock:    clock,
 	})
-	c.Assert(errors.Cause(err), jc.Satisfies, retry.IsRetryAttemptsExceeded)
-	c.Assert(clock.delays, gc.HasLen, 3)
-	c.Assert(funcErrors, gc.DeepEquals, []error{funcErr, funcErr, funcErr})
-	c.Assert(retries, gc.DeepEquals, []int{1, 2, 3})
+	c.Assert(errors.Cause(err), jc.Satisfies, retry.IsAttemptsExceeded)
+	c.Assert(clock.delays, gc.HasLen, 2)
+	c.Assert(funcErrors, jc.DeepEquals, []error{funcErr, funcErr, funcErr})
+	c.Assert(attempts, jc.DeepEquals, []int{1, 2, 3})
 }
 
 func (*retrySuite) TestInfiniteRetries(c *gc.C) {
@@ -179,12 +187,9 @@ func (*retrySuite) TestInfiniteRetries(c *gc.C) {
 			count++
 			return errors.New("bah")
 		},
-		NotifyFunc: func(lastError error, attempt int) {
-			c.Logf("attempt %d\n", attempt)
-		},
-		RetryAttempts: retry.UnlimitedAttempts,
-		Clock:         clock,
-		Stop:          stop,
+		Attempts: retry.UnlimitedAttempts,
+		Clock:    clock,
+		Stop:     stop,
 	})
 	c.Assert(errors.Cause(err), jc.Satisfies, retry.IsRetryStopped)
 	c.Assert(clock.delays, gc.HasLen, count)
@@ -194,14 +199,14 @@ func (*retrySuite) TestMaxDelay(c *gc.C) {
 	clock := &mockClock{}
 	err := retry.Call(retry.CallArgs{
 		Func:          func() error { return errors.New("bah") },
-		RetryAttempts: 6,
+		Attempts:      7,
 		Delay:         time.Minute,
 		MaxDelay:      10 * time.Minute,
 		BackoffFactor: 2,
 		Clock:         clock,
 	})
-	c.Assert(errors.Cause(err), jc.Satisfies, retry.IsRetryAttemptsExceeded)
-	c.Assert(clock.delays, gc.DeepEquals, []time.Duration{
+	c.Assert(errors.Cause(err), jc.Satisfies, retry.IsAttemptsExceeded)
+	c.Assert(clock.delays, jc.DeepEquals, []time.Duration{
 		time.Minute,
 		2 * time.Minute,
 		4 * time.Minute,
@@ -220,7 +225,7 @@ func (*retrySuite) TestWithWallClock(c *gc.C) {
 		},
 		Delay: time.Microsecond,
 	})
-	c.Assert(errors.Cause(err), jc.Satisfies, retry.IsRetryAttemptsExceeded)
+	c.Assert(errors.Cause(err), jc.Satisfies, retry.IsAttemptsExceeded)
 	c.Assert(attempts, jc.DeepEquals, []int{1, 2, 3, 4, 5})
 }
 
@@ -233,9 +238,8 @@ func (*retrySuite) TestBackoffNormalisation(c *gc.C) {
 			BackoffFactor: factor,
 			Clock:         clock,
 		})
-		c.Check(errors.Cause(err), jc.Satisfies, retry.IsRetryAttemptsExceeded)
-		c.Check(clock.delays, gc.DeepEquals, []time.Duration{
-			retry.DefaultDelay,
+		c.Check(errors.Cause(err), jc.Satisfies, retry.IsAttemptsExceeded)
+		c.Check(clock.delays, jc.DeepEquals, []time.Duration{
 			retry.DefaultDelay,
 			retry.DefaultDelay,
 			retry.DefaultDelay,

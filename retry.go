@@ -16,11 +16,11 @@ const (
 	// DefaultDelay is the delay used if the caller did not specify one.
 	DefaultDelay = 100 * time.Millisecond
 
-	// DefaultRetryAttempts is the number of times that the function is
-	// retried if the user did not specify a number for retry attempts.
-	DefaultRetryAttempts = 5
+	// DefaultAttempts is the number of times that the function is
+	// attempted if the user did not specify a number for attempts.
+	DefaultAttempts = 5
 
-	// UnlimitedAttempts can be used as a value for `RetryAttempts` to clearly
+	// UnlimitedAttempts can be used as a value for `Attempts` to clearly
 	// show to the reader that there is no limit to the number of attempts.
 	UnlimitedAttempts = -1
 )
@@ -31,23 +31,23 @@ var (
 	RetryStopped = errors.New("retry stopped")
 )
 
-// RetryAttemptsExceeded is the error that is returned when the retry count has
+// AttemptsExceeded is the error that is returned when the retry count has
 // been hit without the function returning a nil error result. The last error
 // returned from the function being retried is available as the LastError
 // attribute.
-type RetryAttemptsExceeded struct {
+type AttemptsExceeded struct {
 	LastError error
 }
 
 // Error provides the implementation for the error interface method.
-func (e *RetryAttemptsExceeded) Error() string {
-	return fmt.Sprintf("retry count exceeded: %s", e.LastError)
+func (e *AttemptsExceeded) Error() string {
+	return fmt.Sprintf("attempt count exceeded: %s", e.LastError)
 }
 
-// IsRetryAttemptsExceeded returns true if the error is a RetryAttemptsExceeded
+// IsAttemptsExceeded returns true if the error is a AttemptsExceeded
 // error.
-func IsRetryAttemptsExceeded(err error) bool {
-	_, ok := err.(*RetryAttemptsExceeded)
+func IsAttemptsExceeded(err error) bool {
+	_, ok := err.(*AttemptsExceeded)
 	return ok
 }
 
@@ -72,11 +72,11 @@ type CallArgs struct {
 	// time, attempt is 2 and so on.
 	NotifyFunc func(lastError error, attempt int)
 
-	// RetryAttempts specifies the number of times Func should be retried before
-	// giving up and returning the `RetryAttemptsExceeded` error. If this is not
-	// specified, the `DefaultRetryAttempts` value is used. If a negative retry
+	// Attempts specifies the number of times Func should be retried before
+	// giving up and returning the `AttemptsExceeded` error. If this is not
+	// specified, the `DefaultAttempts` value is used. If a negative retry
 	// count is specified, the `Call` will retry forever.
-	RetryAttempts int
+	Attempts int
 
 	// Delay specifies how long to wait between retries. If no value is specified
 	// the `DefaultDelay` value is used.
@@ -107,8 +107,8 @@ func (args *CallArgs) populateDefaults() {
 	if args.BackoffFactor < 1 {
 		args.BackoffFactor = 1
 	}
-	if args.RetryAttempts == 0 {
-		args.RetryAttempts = DefaultRetryAttempts
+	if args.Attempts == 0 {
+		args.Attempts = DefaultAttempts
 	}
 	if args.Delay == 0 {
 		args.Delay = DefaultDelay
@@ -123,7 +123,7 @@ func (args *CallArgs) populateDefaults() {
 func Call(args CallArgs) error {
 	args.populateDefaults()
 	var err error
-	for i := 0; args.RetryAttempts < 0 || i < args.RetryAttempts; i++ {
+	for i := 1; args.Attempts < 0 || i <= args.Attempts; i++ {
 		err = args.Func()
 		if err == nil {
 			return nil
@@ -131,11 +131,11 @@ func Call(args CallArgs) error {
 		if args.IsFatalError != nil && args.IsFatalError(err) {
 			return errors.Trace(err)
 		}
-		if i == args.RetryAttempts && args.RetryAttempts > 0 {
-			break // don't wait before returning the error
-		}
 		if args.NotifyFunc != nil {
-			args.NotifyFunc(err, i+1)
+			args.NotifyFunc(err, i)
+		}
+		if i == args.Attempts && args.Attempts > 0 {
+			break // don't wait before returning the error
 		}
 		// Wait for the delay, and retry
 		select {
@@ -146,7 +146,7 @@ func Call(args CallArgs) error {
 
 		args.Delay = ScaleDuration(args.Delay, args.MaxDelay, args.BackoffFactor)
 	}
-	return errors.Wrap(err, &RetryAttemptsExceeded{err})
+	return errors.Wrap(err, &AttemptsExceeded{err})
 }
 
 // ScaleDuration scale up the `current` duration by a factor of `scale`, with
