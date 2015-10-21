@@ -5,6 +5,7 @@ package retry
 
 import (
 	"fmt"
+	"math"
 	"time"
 
 	"github.com/juju/errors"
@@ -15,9 +16,13 @@ const (
 	// DefaultDelay is the delay used if the caller did not specify one.
 	DefaultDelay = 100 * time.Millisecond
 
-	// DefaultRetryCount is the number of times that the function is retried
-	// if the user did not specify a retry count.
-	DefaultRetryCount = 5
+	// DefaultRetryAttempts is the number of times that the function is
+	// retried if the user did not specify a number for retry attempts.
+	DefaultRetryAttempts = 5
+
+	// UnlimitedAttempts can be used as a value for `RetryAttempts` to clearly
+	// show to the reader that there is no limit to the number of attempts.
+	UnlimitedAttempts = -1
 )
 
 var (
@@ -26,24 +31,23 @@ var (
 	RetryStopped = errors.New("retry stopped")
 )
 
-// RetryCountExceeded is the error that is returned when the retry count has
+// RetryAttemptsExceeded is the error that is returned when the retry count has
 // been hit without the function returning a nil error result. The last error
 // returned from the function being retried is available as the LastError
 // attribute.
-type RetryCountExceeded struct {
+type RetryAttemptsExceeded struct {
 	LastError error
 }
 
 // Error provides the implementation for the error interface method.
-func (e *RetryCountExceeded) Error() string {
+func (e *RetryAttemptsExceeded) Error() string {
 	return fmt.Sprintf("retry count exceeded: %s", e.LastError)
 }
 
-// IsRetryCountExceeded returns true if the error is a RetryCountExceeded
+// IsRetryAttemptsExceeded returns true if the error is a RetryAttemptsExceeded
 // error.
-func IsRetryCountExceeded(err error) bool {
-	err = errors.Cause(err)
-	_, ok := err.(*RetryCountExceeded)
+func IsRetryAttemptsExceeded(err error) bool {
+	_, ok := err.(*RetryAttemptsExceeded)
 	return ok
 }
 
@@ -58,19 +62,29 @@ type CallArgs struct {
 	// Func is the function that will be retried if it returns an error result.
 	Func func() error
 
-	// NotifyFunc is a function that is called if Func fails, and the attempt
-	// number. The first time this function is called retry is 1, the second time,
-	// retry is 2 and so on.
-	NotifyFunc func(lastError error, retry int)
+	// IsFatalError is a function that, if set, will be called for every non-
+	// nil error result from `Func`. If `IsFatalError` returns true, the error
+	// is immediately returned breaking out from any further retries.
+	IsFatalError func(error) bool
 
-	// RetryCount specifies the number of times Func should be retried before
-	// giving up and returning the `RetryCountExceeded` error. If this is not
-	// specified, the `DefaultRetryCount` value is used.
-	RetryCount int
+	// NotifyFunc is a function that is called if Func fails, and the attempt
+	// number. The first time this function is called attempt is 1, the second
+	// time, attempt is 2 and so on.
+	NotifyFunc func(lastError error, attempt int)
+
+	// RetryAttempts specifies the number of times Func should be retried before
+	// giving up and returning the `RetryAttemptsExceeded` error. If this is not
+	// specified, the `DefaultRetryAttempts` value is used. If a negative retry
+	// count is specified, the `Call` will retry forever.
+	RetryAttempts int
 
 	// Delay specifies how long to wait between retries. If no value is specified
 	// the `DefaultDelay` value is used.
 	Delay time.Duration
+
+	// MaxDelay specifies how longest time to wait between retries. If no
+	// value is specified there is no maximum delay.
+	MaxDelay time.Duration
 
 	// BackoffFactor is a multiplier used on the Delay each time the function waits.
 	// If not specified, a factor of 1 is used, which means the delay does not increase
@@ -93,8 +107,8 @@ func (args *CallArgs) populateDefaults() {
 	if args.BackoffFactor < 1 {
 		args.BackoffFactor = 1
 	}
-	if args.RetryCount < 1 {
-		args.RetryCount = DefaultRetryCount
+	if args.RetryAttempts == 0 {
+		args.RetryAttempts = DefaultRetryAttempts
 	}
 	if args.Delay == 0 {
 		args.Delay = DefaultDelay
@@ -109,32 +123,45 @@ func (args *CallArgs) populateDefaults() {
 func Call(args CallArgs) error {
 	args.populateDefaults()
 	var err error
-	for i := args.RetryCount; i >= 0; i-- {
+	for i := 0; args.RetryAttempts < 0 || i < args.RetryAttempts; i++ {
 		err = args.Func()
 		if err == nil {
 			return nil
 		}
-		if i == 0 {
+		if args.IsFatalError != nil && args.IsFatalError(err) {
+			return errors.Trace(err)
+		}
+		if i == args.RetryAttempts && args.RetryAttempts > 0 {
 			break // don't wait before returning the error
 		}
 		if args.NotifyFunc != nil {
-			args.NotifyFunc(err, args.RetryCount-i+1)
+			args.NotifyFunc(err, i+1)
 		}
 		// Wait for the delay, and retry
-		if args.Stop == nil {
-			<-args.Clock.After(args.Delay)
-		} else {
-			select {
-			case <-args.Clock.After(args.Delay):
-			case <-args.Stop:
-				return RetryStopped
-			}
+		select {
+		case <-args.Clock.After(args.Delay):
+		case <-args.Stop:
+			return RetryStopped
 		}
-		// Since the backoff factory may be something like 1.5, or 2
-		// and time.Duration is an int64, we need a little casting here.
-		if args.BackoffFactor != 1 {
-			args.Delay = (time.Duration)((float64)(args.Delay) * args.BackoffFactor)
-		}
+
+		args.Delay = ScaleDuration(args.Delay, args.MaxDelay, args.BackoffFactor)
 	}
-	return errors.Wrap(err, &RetryCountExceeded{err})
+	return errors.Wrap(err, &RetryAttemptsExceeded{err})
+}
+
+// ScaleDuration scale up the `current` duration by a factor of `scale`, with
+// a capped value of `max`. If `max` is zero, it means there is no maximum
+// duration.
+func ScaleDuration(current, max time.Duration, scale float64) time.Duration {
+	// Any overhead that we may possibly incur by multiplying something by one,
+	// is more than overcome by the sleeping that will occur.
+
+	// Since scale may be something like 1.5, or 2 and time.Duration is an
+	// int64, we need a little casting here. Also, a negative scale is treated
+	// as positive.
+	duration := (time.Duration)((float64)(current) * math.Abs(scale))
+	if duration > max && max > 0 {
+		return max
+	}
+	return duration
 }
