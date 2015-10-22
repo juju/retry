@@ -18,11 +18,9 @@ The simple use is to call retry.Call with a function closure.
 ```
 
 The bare minimum arguments that need to be specified are:
-
-
-	* Func - the function to call
-	* Attempts - the number of times to try Func before giving up
-	* Delay - how long to wait between each try that returns an error
+* Func - the function to call
+* Attempts - the number of times to try Func before giving up
+* Delay - how long to wait between each try that returns an error
 
 
 
@@ -169,6 +167,10 @@ function.
 ``` go
 func (args *CallArgs) Validate() error
 ```
+Validate the values are valid. The ensures that the Func, Delay and Attempts
+have been specified, and that the BackoffFactor makes sense (i.e. one or greater).
+If BackoffFactor is not explicitly set, it is set here to be one.
+
 
 
 

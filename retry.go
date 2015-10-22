@@ -14,9 +14,9 @@
 // ```
 //
 // The bare minimum arguments that need to be specified are:
-//  * Func - the function to call
-//  * Attempts - the number of times to try Func before giving up
-//  * Delay - how long to wait between each try that returns an error
+// * Func - the function to call
+// * Attempts - the number of times to try Func before giving up
+// * Delay - how long to wait between each try that returns an error
 //
 package retry
 
@@ -111,6 +111,9 @@ type CallArgs struct {
 	Stop <-chan struct{}
 }
 
+// Validate the values are valid. The ensures that the Func, Delay and Attempts
+// have been specified, and that the BackoffFactor makes sense (i.e. one or greater).
+// If BackoffFactor is not explicitly set, it is set here to be one.
 func (args *CallArgs) Validate() error {
 	if args.BackoffFactor == 0 {
 		args.BackoffFactor = 1
