@@ -1,6 +1,23 @@
 // Copyright 2015 Canonical Ltd.
 // Licensed under the LGPLv3, see LICENCE file for details.
 
+// The retry package encapsulates the mechanism around retrying commands.
+//
+// The simple use is to call retry.Call with a function closure.
+//
+// ```go
+//	err := retry.Call(retry.CallArgs{
+//		Func:     func() error { ... },
+//		Attempts: 5,
+//		Delay:    time.Minute,
+//	})
+// ```
+//
+// The bare minimum arguments that need to be specified are:
+//  * Func - the function to call
+//  * Attempts - the number of times to try Func before giving up
+//  * Delay - how long to wait between each try that returns an error
+//
 package retry
 
 import (
@@ -13,13 +30,6 @@ import (
 )
 
 const (
-	// DefaultDelay is the delay used if the caller did not specify one.
-	DefaultDelay = 100 * time.Millisecond
-
-	// DefaultAttempts is the number of times that the function is
-	// attempted if the user did not specify a number for attempts.
-	DefaultAttempts = 5
-
 	// UnlimitedAttempts can be used as a value for `Attempts` to clearly
 	// show to the reader that there is no limit to the number of attempts.
 	UnlimitedAttempts = -1
@@ -73,13 +83,11 @@ type CallArgs struct {
 	NotifyFunc func(lastError error, attempt int)
 
 	// Attempts specifies the number of times Func should be retried before
-	// giving up and returning the `AttemptsExceeded` error. If this is not
-	// specified, the `DefaultAttempts` value is used. If a negative retry
-	// count is specified, the `Call` will retry forever.
+	// giving up and returning the `AttemptsExceeded` error. If a negative
+	// value is specified, the `Call` will retry forever.
 	Attempts int
 
-	// Delay specifies how long to wait between retries. If no value is specified
-	// the `DefaultDelay` value is used.
+	// Delay specifies how long to wait between retries.
 	Delay time.Duration
 
 	// MaxDelay specifies how longest time to wait between retries. If no
@@ -103,26 +111,35 @@ type CallArgs struct {
 	Stop <-chan struct{}
 }
 
-func (args *CallArgs) populateDefaults() {
-	if args.BackoffFactor < 1 {
+func (args *CallArgs) Validate() error {
+	if args.BackoffFactor == 0 {
 		args.BackoffFactor = 1
-	}
-	if args.Attempts == 0 {
-		args.Attempts = DefaultAttempts
-	}
-	if args.Delay == 0 {
-		args.Delay = DefaultDelay
 	}
 	if args.Clock == nil {
 		args.Clock = clock.WallClock
 	}
+	if args.Func == nil {
+		return errors.NotValidf("missing Func")
+	}
+	if args.Delay == 0 {
+		return errors.NotValidf("missing Delay")
+	}
+	if args.Attempts == 0 {
+		return errors.NotValidf("missing Attempts")
+	}
+	if args.BackoffFactor < 1 {
+		return errors.NotValidf("BackoffFactor of %s", args.BackoffFactor)
+	}
+	return nil
 }
 
 // Call will repeatedly execute the Func until either the function returns no
 // error, the retry count is exceeded or the stop channel is closed.
 func Call(args CallArgs) error {
-	args.populateDefaults()
-	var err error
+	err := args.Validate()
+	if err != nil {
+		return errors.Trace(err)
+	}
 	for i := 1; args.Attempts < 0 || i <= args.Attempts; i++ {
 		err = args.Func()
 		if err == nil {

@@ -10,3 +10,6 @@ check-licence:
 
 check: check-licence
 	go test $(PROJECT)/...
+
+docs:
+	godoc2md $(PROJECT) > README.md
