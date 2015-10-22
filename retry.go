@@ -18,6 +18,14 @@
 // * Attempts - the number of times to try Func before giving up
 // * Delay - how long to wait between each try that returns an error
 //
+// Any error that is returned from the `Func` is considered transient.
+// In order to identify some errors as fatal, pass in a function for the
+// `IsFatalError` CallArgs value.
+//
+// Exponential backoff is supported by passing a value > 1 for the
+// `BackoffFactor` in the CallArgs. This is treated as a multiplier for
+// the specified `Delay` each time through the loop. To cap the `Delay`,
+// pass a value for the `MaxDelay`.
 package retry
 
 import (
