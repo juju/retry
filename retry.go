@@ -32,52 +32,52 @@
 // as:
 //
 // ```go
-// func StepDelay(attempt int, last time.Duration) time.Duration {
-// 	switch attempt{
-// 	case 1:
-// 		return time.Second
-// 	case 2:
-// 		return 5 * time.Second
-// 	case 3:
-// 		return 20 * time.Second
-// 	case 4:
-// 		return time.Minute
-// 	case 5:
-// 		return 5 * time.Minute
-// 	default:
-// 		return 2 * last
-// 	}
-// }
+//	func StepDelay(attempt int, last time.Duration) time.Duration {
+//		switch attempt{
+//		case 1:
+//			return time.Second
+//		case 2:
+//			return 5 * time.Second
+//		case 3:
+//			return 20 * time.Second
+//		case 4:
+//			return time.Minute
+//		case 5:
+//			return 5 * time.Minute
+//		default:
+//			return 2 * last
+//		}
+//	}
 // ```
 //
-// Consider some package `foo` that has a TryAgainError, which looks something
+// Consider some package `foo` that has a `TryAgainError`, which looks something
 // like this:
 // ```go
-// type TryAgainError struct {
-//   After time.Duration
-// }
+//	type TryAgainError struct {
+//		After time.Duration
+//	}
 // ```
 // and we create something that looks like this:
 //
 // ```go
-// type TryAgainHelper struct {
-// 	next time.Duration
-// }
+//	type TryAgainHelper struct {
+//		next time.Duration
+//	}
 //
-// func (h *TryAgainHelper) notify(lastError error, attempt int) {
-// 	if tryAgain, ok := lastError.(*foo.TryAgainError); ok {
-// 		h.next = tryAgain.After
-// 	} else {
-// 		h.next = 0
-// 	}
-// }
+//	func (h *TryAgainHelper) notify(lastError error, attempt int) {
+//		if tryAgain, ok := lastError.(*foo.TryAgainError); ok {
+//			h.next = tryAgain.After
+//		} else {
+//			h.next = 0
+//		}
+//	}
 //
-// func (h *TryAgainHelper) next(last time.Duration) time.Duration {
-// 	if h.next != 0 {
-// 		return h.next
-// 	}
-// 	return last
-// }
+//	func (h *TryAgainHelper) next(last time.Duration) time.Duration {
+//		if h.next != 0 {
+//			return h.next
+//		}
+//		return last
+//	}
 // ```
 //
 // Then we could do this:
@@ -91,7 +91,7 @@
 //		BackoffFunc: helper.next,
 //		Attempts:    20,
 //		Delay:       100 * time.Millisecond,
-//      Clock:       clock.WallClock,
+//		Clock:       clock.WallClock,
 //	})
 // ```
 package retry

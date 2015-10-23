@@ -13,6 +13,7 @@ The simple use is to call retry.Call with a function closure.
 		Func:     func() error { ... },
 		Attempts: 5,
 		Delay:    time.Minute,
+		Clock:    clock.WallClock,
 	})
 
 ```
@@ -21,15 +22,94 @@ The bare minimum arguments that need to be specified are:
 * Func - the function to call
 * Attempts - the number of times to try Func before giving up
 * Delay - how long to wait between each try that returns an error
+* Clock - either the wall clock, or some testing clock
 
 Any error that is returned from the `Func` is considered transient.
 In order to identify some errors as fatal, pass in a function for the
 `IsFatalError` CallArgs value.
 
-Exponential backoff is supported by passing a value > 1 for the
-`BackoffFactor` in the CallArgs. This is treated as a multiplier for
-the specified `Delay` each time through the loop. To cap the `Delay`,
-pass a value for the `MaxDelay`.
+In order to have the `Delay` change for each iteration, a `BackoffFunc`
+needs to be set on the CallArgs. A simple doubling delay function is
+provided by `DoubleDelay`.
+
+An example of a more complex `BackoffFunc` could be a stepped function such
+as:
+
+```go
+
+
+	func StepDelay(attempt int, last time.Duration) time.Duration {
+		switch attempt{
+		case 1:
+			return time.Second
+		case 2:
+			return 5 * time.Second
+		case 3:
+			return 20 * time.Second
+		case 4:
+			return time.Minute
+		case 5:
+			return 5 * time.Minute
+		default:
+			return 2 * last
+		}
+	}
+
+```
+
+Consider some package `foo` that has a `TryAgainError`, which looks something
+like this:
+```go
+
+
+	type TryAgainError struct {
+		After time.Duration
+	}
+
+```
+and we create something that looks like this:
+
+```go
+
+
+	type TryAgainHelper struct {
+		next time.Duration
+	}
+	
+	func (h *TryAgainHelper) notify(lastError error, attempt int) {
+		if tryAgain, ok := lastError.(*foo.TryAgainError); ok {
+			h.next = tryAgain.After
+		} else {
+			h.next = 0
+		}
+	}
+	
+	func (h *TryAgainHelper) next(last time.Duration) time.Duration {
+		if h.next != 0 {
+			return h.next
+		}
+		return last
+	}
+
+```
+
+Then we could do this:
+```go
+
+
+	helper := TryAgainHelper{}
+	retry.Call(retry.CallArgs{
+		Func: func() error {
+			return foo.SomeFunc()
+		},
+		NotifyFunc:  helper.notify,
+		BackoffFunc: helper.next,
+		Attempts:    20,
+		Delay:       100 * time.Millisecond,
+		Clock:       clock.WallClock,
+	})
+
+```
 
 
 
@@ -58,6 +138,15 @@ func Call(args CallArgs) error
 ```
 Call will repeatedly execute the Func until either the function returns no
 error, the retry count is exceeded or the stop channel is closed.
+
+
+## func DoubleDelay
+``` go
+func DoubleDelay(attempt int, delay time.Duration) time.Duration
+```
+DoubleDelay provides a simple function that doubles the duration passed in.
+This can then be easily used as the `BackoffFunc` in the `CallArgs`
+structure.
 
 
 ## func IsAttemptsExceeded
@@ -142,11 +231,13 @@ type CallArgs struct {
     // value is specified there is no maximum delay.
     MaxDelay time.Duration
 
-    // BackoffFactor is a multiplier used on the Delay each time the function waits.
-    // If not specified, a factor of 1 is used, which means the delay does not increase
-    // each time through the loop. A factor of 2 would indicate that the second delay
-    // would be twice the first, and the third twice the second, and so on.
-    BackoffFactor float64
+    // BackoffFunc allows the caller to provide a function that alters the
+    // delay each time through the loop. If this function is not provided the
+    // delay is the same each iteration. Alternatively a function such as
+    // `retry.DoubleDelay` can be used that will provide an exponential
+    // backoff. The first time this function is called attempt is 1, the
+    // second time, attempt is 2 and so on.
+    BackoffFunc func(attempt int, delay time.Duration) time.Duration
 
     // Clock defaults to clock.Wall, but allows the caller to pass one in.
     // Primarily used for testing purposes.
