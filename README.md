@@ -38,7 +38,7 @@ as:
 ```go
 
 
-	func StepDelay(attempt int, last time.Duration) time.Duration {
+	func StepDelay(last time.Duration, attempt int) time.Duration {
 		switch attempt{
 		case 1:
 			return time.Second
@@ -142,7 +142,7 @@ error, the retry count is exceeded or the stop channel is closed.
 
 ## func DoubleDelay
 ``` go
-func DoubleDelay(attempt int, delay time.Duration) time.Duration
+func DoubleDelay(delay time.Duration, attempt int) time.Duration
 ```
 DoubleDelay provides a simple function that doubles the duration passed in.
 This can then be easily used as the `BackoffFunc` in the `CallArgs`
@@ -237,10 +237,11 @@ type CallArgs struct {
     // `retry.DoubleDelay` can be used that will provide an exponential
     // backoff. The first time this function is called attempt is 1, the
     // second time, attempt is 2 and so on.
-    BackoffFunc func(attempt int, delay time.Duration) time.Duration
+    BackoffFunc func(delay time.Duration, attempt int) time.Duration
 
-    // Clock defaults to clock.Wall, but allows the caller to pass one in.
-    // Primarily used for testing purposes.
+    // Clock provides the mechanism for waiting. Normal program execution is
+    // expected to use something like clock.WallClock, and tests can override
+    // this to not actually sleep in tests.
     Clock clock.Clock
 
     // Stop is a channel that can be used to indicate that the waiting should
@@ -267,9 +268,8 @@ function.
 ``` go
 func (args *CallArgs) Validate() error
 ```
-Validate the values are valid. The ensures that the Func, Delay and Attempts
-have been specified, and that the BackoffFactor makes sense (i.e. one or greater).
-If BackoffFactor is not explicitly set, it is set here to be one.
+Validate the values are valid. The ensures that the Func, Delay, Attempts
+and Clock have been specified.
 
 
 

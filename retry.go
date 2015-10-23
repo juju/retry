@@ -32,7 +32,7 @@
 // as:
 //
 // ```go
-//	func StepDelay(attempt int, last time.Duration) time.Duration {
+//	func StepDelay(last time.Duration, attempt int) time.Duration {
 //		switch attempt{
 //		case 1:
 //			return time.Second
@@ -176,10 +176,11 @@ type CallArgs struct {
 	// `retry.DoubleDelay` can be used that will provide an exponential
 	// backoff. The first time this function is called attempt is 1, the
 	// second time, attempt is 2 and so on.
-	BackoffFunc func(attempt int, delay time.Duration) time.Duration
+	BackoffFunc func(delay time.Duration, attempt int) time.Duration
 
-	// Clock defaults to clock.Wall, but allows the caller to pass one in.
-	// Primarily used for testing purposes.
+	// Clock provides the mechanism for waiting. Normal program execution is
+	// expected to use something like clock.WallClock, and tests can override
+	// this to not actually sleep in tests.
 	Clock clock.Clock
 
 	// Stop is a channel that can be used to indicate that the waiting should
@@ -189,9 +190,8 @@ type CallArgs struct {
 	Stop <-chan struct{}
 }
 
-// Validate the values are valid. The ensures that the Func, Delay and Attempts
-// have been specified, and that the BackoffFactor makes sense (i.e. one or greater).
-// If BackoffFactor is not explicitly set, it is set here to be one.
+// Validate the values are valid. The ensures that the Func, Delay, Attempts
+// and Clock have been specified.
 func (args *CallArgs) Validate() error {
 	if args.Func == nil {
 		return errors.NotValidf("missing Func")
@@ -231,7 +231,7 @@ func Call(args CallArgs) error {
 		}
 
 		if args.BackoffFunc != nil {
-			delay := args.BackoffFunc(i, args.Delay)
+			delay := args.BackoffFunc(args.Delay, i)
 			if delay > args.MaxDelay && args.MaxDelay > 0 {
 				delay = args.MaxDelay
 			}
@@ -251,7 +251,7 @@ func Call(args CallArgs) error {
 // DoubleDelay provides a simple function that doubles the duration passed in.
 // This can then be easily used as the `BackoffFunc` in the `CallArgs`
 // structure.
-func DoubleDelay(attempt int, delay time.Duration) time.Duration {
+func DoubleDelay(delay time.Duration, attempt int) time.Duration {
 	if attempt == 1 {
 		return delay
 	}
