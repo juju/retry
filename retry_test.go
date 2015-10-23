@@ -117,11 +117,11 @@ func (*retrySuite) TestFatalErrorsNotRetried(c *gc.C) {
 func (*retrySuite) TestBackoffFactor(c *gc.C) {
 	clock := &mockClock{}
 	err := retry.Call(retry.CallArgs{
-		Func:          func() error { return errors.New("bah") },
-		Clock:         clock,
-		Attempts:      5,
-		Delay:         time.Minute,
-		BackoffFactor: 2,
+		Func:        func() error { return errors.New("bah") },
+		Clock:       clock,
+		Attempts:    5,
+		Delay:       time.Minute,
+		BackoffFunc: retry.DoubleDelay,
 	})
 	c.Assert(errors.Cause(err), jc.Satisfies, retry.IsAttemptsExceeded)
 	c.Assert(clock.delays, jc.DeepEquals, []time.Duration{
@@ -203,12 +203,12 @@ func (*retrySuite) TestInfiniteRetries(c *gc.C) {
 func (*retrySuite) TestMaxDelay(c *gc.C) {
 	clock := &mockClock{}
 	err := retry.Call(retry.CallArgs{
-		Func:          func() error { return errors.New("bah") },
-		Attempts:      7,
-		Delay:         time.Minute,
-		MaxDelay:      10 * time.Minute,
-		BackoffFactor: 2,
-		Clock:         clock,
+		Func:        func() error { return errors.New("bah") },
+		Attempts:    7,
+		Delay:       time.Minute,
+		MaxDelay:    10 * time.Minute,
+		BackoffFunc: retry.DoubleDelay,
+		Clock:       clock,
 	})
 	c.Assert(errors.Cause(err), jc.Satisfies, retry.IsAttemptsExceeded)
 	c.Assert(clock.delays, jc.DeepEquals, []time.Duration{
@@ -230,6 +230,7 @@ func (*retrySuite) TestWithWallClock(c *gc.C) {
 		},
 		Attempts: 5,
 		Delay:    time.Microsecond,
+		Clock:    clock.WallClock,
 	})
 	c.Assert(errors.Cause(err), jc.Satisfies, retry.IsAttemptsExceeded)
 	c.Assert(attempts, jc.DeepEquals, []int{1, 2, 3, 4, 5})
@@ -239,6 +240,7 @@ func (*retrySuite) TestMissingFuncNotValid(c *gc.C) {
 	err := retry.Call(retry.CallArgs{
 		Attempts: 5,
 		Delay:    time.Minute,
+		Clock:    clock.WallClock,
 	})
 	c.Check(err, jc.Satisfies, errors.IsNotValid)
 	c.Check(err, gc.ErrorMatches, `missing Func not valid`)
@@ -248,6 +250,7 @@ func (*retrySuite) TestMissingAttemptsNotValid(c *gc.C) {
 	err := retry.Call(retry.CallArgs{
 		Func:  func() error { return errors.New("bah") },
 		Delay: time.Minute,
+		Clock: clock.WallClock,
 	})
 	c.Check(err, jc.Satisfies, errors.IsNotValid)
 	c.Check(err, gc.ErrorMatches, `missing Attempts not valid`)
@@ -257,40 +260,20 @@ func (*retrySuite) TestMissingDelayNotValid(c *gc.C) {
 	err := retry.Call(retry.CallArgs{
 		Func:     func() error { return errors.New("bah") },
 		Attempts: 5,
+		Clock:    clock.WallClock,
 	})
 	c.Check(err, jc.Satisfies, errors.IsNotValid)
 	c.Check(err, gc.ErrorMatches, `missing Delay not valid`)
 }
 
-func (*retrySuite) TestBackoffErrors(c *gc.C) {
-	// Backoff values of less than one are a validation error.
-	for _, factor := range []float64{-2, 0.5} {
-		err := retry.Call(retry.CallArgs{
-			Func:          func() error { return errors.New("bah") },
-			Attempts:      5,
-			Delay:         time.Minute,
-			BackoffFactor: factor,
-		})
-		c.Check(err, jc.Satisfies, errors.IsNotValid)
-		c.Check(err, gc.ErrorMatches, `BackoffFactor of .* not valid`)
-	}
-}
-
-func (*retrySuite) TestCallArgsDefaults(c *gc.C) {
-	// BackoffFactor is one of the two values with reasonable
-	// defaults, and the default is linear if not specified.
-	// The other default is the Clock. If not specified, it is the
-	// wall clock.
-	args := retry.CallArgs{
+func (*retrySuite) TestMissingClockNotValid(c *gc.C) {
+	err := retry.Call(retry.CallArgs{
 		Func:     func() error { return errors.New("bah") },
 		Attempts: 5,
 		Delay:    time.Minute,
-	}
-
-	err := args.Validate()
-	c.Assert(err, jc.ErrorIsNil)
-	c.Assert(args.BackoffFactor, gc.Equals, float64(1))
-	c.Assert(args.Clock, gc.Equals, clock.WallClock)
+	})
+	c.Check(err, jc.Satisfies, errors.IsNotValid)
+	c.Check(err, gc.ErrorMatches, `missing Clock not valid`)
 }
 
 func (*retrySuite) TestScaleDuration(c *gc.C) {
