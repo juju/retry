@@ -123,14 +123,6 @@ const (
 )
 ```
 
-## Variables
-``` go
-var (
-    // RetryStopped is the error that is returned from the retry functions
-    // when the stop channel has been closed.
-    RetryStopped = errors.New("retry stopped")
-)
-```
 
 ## func Call
 ``` go
@@ -153,44 +145,34 @@ structure.
 ``` go
 func IsAttemptsExceeded(err error) bool
 ```
-IsAttemptsExceeded returns true if the error is a AttemptsExceeded
-error.
+IsAttemptsExceeded returns true if the error is the result of the `Call`
+function finishing due to hitting the requested number of `Attempts`.
 
 
 ## func IsRetryStopped
 ``` go
 func IsRetryStopped(err error) bool
 ```
-IsRetryStopped returns true if the error is RetryStopped.
+IsRetryStopped returns true if the error is the result of the `Call`
+function finishing due to the stop channel being closed.
 
 
-
-## type AttemptsExceeded
+## func IsWaitTimeExceeded
 ``` go
-type AttemptsExceeded struct {
-    LastError error
-}
+func IsWaitTimeExceeded(err error) bool
 ```
-AttemptsExceeded is the error that is returned when the retry count has
-been hit without the function returning a nil error result. The last error
-returned from the function being retried is available as the LastError
-attribute.
+IsWaitTimeExceeded returns true if the error is the result of the `Call`
+function finishing due to the total waiting duration exceeding the specified
+`MaxWait` value.
 
 
-
-
-
-
-
-
-
-
-
-### func (\*AttemptsExceeded) Error
+## func LastError
 ``` go
-func (e *AttemptsExceeded) Error() string
+func LastError(err error) error
 ```
-Error provides the implementation for the error interface method.
+LastError retrieves the last error returned from `Func` before iteration
+was terminated due to the maximum attempt count or maximum wait time being
+exceeded, or the stop channel being closed.
 
 
 
@@ -221,6 +203,13 @@ type CallArgs struct {
     // MaxDelay specifies how longest time to wait between retries. If no
     // value is specified there is no maximum delay.
     MaxDelay time.Duration
+
+    // MaxWait specifies the maximum time the Call function should wait. The
+    // wait time is the summation of the delays over the attempts. If the next
+    // delay time would take the total waiting duration over MaxWait, then an
+    // WaitTimeExceeded error is returned. If no value is specified, Call will
+    // continue until the number of attempts is complete.
+    MaxWait time.Duration
 
     // BackoffFunc allows the caller to provide a function that alters the
     // delay each time through the loop. If this function is not provided the
