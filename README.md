@@ -20,7 +20,7 @@ The simple use is to call retry.Call with a function closure.
 
 The bare minimum arguments that need to be specified are:
 * Func - the function to call
-* Attempts - the number of times to try Func before giving up
+* Attempts - the number of times to try Func before giving up, or a negative number for unlimited attempts (`retry.UnlimitedAttempts`)
 * Delay - how long to wait between each try that returns an error
 * Clock - either the wall clock, or some testing clock
 
@@ -162,15 +162,6 @@ error.
 func IsRetryStopped(err error) bool
 ```
 IsRetryStopped returns true if the error is RetryStopped.
-
-
-## func ScaleDuration
-``` go
-func ScaleDuration(current, max time.Duration, scale float64) time.Duration
-```
-ScaleDuration scale up the `current` duration by a factor of `scale`, with
-a capped value of `max`. If `max` is zero, it means there is no maximum
-duration.
 
 
 
