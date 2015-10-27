@@ -17,35 +17,82 @@ const (
 	UnlimitedAttempts = -1
 )
 
-var (
-	// RetryStopped is the error that is returned from the retry functions
-	// when the stop channel has been closed.
-	RetryStopped = errors.New("retry stopped")
-)
-
-// AttemptsExceeded is the error that is returned when the retry count has
-// been hit without the function returning a nil error result. The last error
-// returned from the function being retried is available as the LastError
-// attribute.
-type AttemptsExceeded struct {
-	LastError error
+// retryStopped is the error that is returned from the `Call` function
+// when the stop channel has been closed.
+type retryStopped struct {
+	lastError error
 }
 
 // Error provides the implementation for the error interface method.
-func (e *AttemptsExceeded) Error() string {
-	return fmt.Sprintf("attempt count exceeded: %s", e.LastError)
+func (e *retryStopped) Error() string {
+	return fmt.Sprintf("retry stopped")
 }
 
-// IsAttemptsExceeded returns true if the error is a AttemptsExceeded
-// error.
+// attemptsExceeded is the error that is returned when the retry count has
+// been hit without the function returning a nil error result. The last error
+// returned from the function being retried is available as the LastError
+// attribute.
+type attemptsExceeded struct {
+	lastError error
+}
+
+// Error provides the implementation for the error interface method.
+func (e *attemptsExceeded) Error() string {
+	return fmt.Sprintf("attempt count exceeded: %s", e.lastError)
+}
+
+// waitTimeExceeded is the error that is returned when the total time that the
+// `Call` function would wait exceeds the `MaxWait` specified. The last error
+// returned from the function being retried is available as the LastError
+// attribute.
+type waitTimeExceeded struct {
+	lastError error
+}
+
+// Error provides the implementation for the error interface method.
+func (e *waitTimeExceeded) Error() string {
+	return fmt.Sprintf("max wait time exceeded: %s", e.lastError)
+}
+
+// LastError retrieves the last error returned from `Func` before iteration
+// was terminated due to the maximum attempt count or maximum wait time being
+// exceeded, or the stop channel being closed.
+func LastError(err error) error {
+	cause := errors.Cause(err)
+	switch err := cause.(type) {
+	case *attemptsExceeded:
+		return err.lastError
+	case *retryStopped:
+		return err.lastError
+	case *waitTimeExceeded:
+		return err.lastError
+	}
+	return errors.Errorf("unexpected error type: %T, %s", cause, cause)
+}
+
+// IsAttemptsExceeded returns true if the error is the result of the `Call`
+// function finishing due to hitting the requested number of `Attempts`.
 func IsAttemptsExceeded(err error) bool {
-	_, ok := err.(*AttemptsExceeded)
+	cause := errors.Cause(err)
+	_, ok := cause.(*attemptsExceeded)
 	return ok
 }
 
-// IsRetryStopped returns true if the error is RetryStopped.
+// IsWaitTimeExceeded returns true if the error is the result of the `Call`
+// function finishing due to the total waiting duration exceeding the specified
+// `MaxWait` value.
+func IsWaitTimeExceeded(err error) bool {
+	cause := errors.Cause(err)
+	_, ok := cause.(*waitTimeExceeded)
+	return ok
+}
+
+// IsRetryStopped returns true if the error is the result of the `Call`
+// function finishing due to the stop channel being closed.
 func IsRetryStopped(err error) bool {
-	return errors.Cause(err) == RetryStopped
+	cause := errors.Cause(err)
+	_, ok := cause.(*retryStopped)
+	return ok
 }
 
 // CallArgs is a simple structure used to define the behaviour of the Call
@@ -76,6 +123,13 @@ type CallArgs struct {
 	// value is specified there is no maximum delay.
 	MaxDelay time.Duration
 
+	// MaxWait specifies the maximum time the Call function should wait. The
+	// wait time is the summation of the delays over the attempts. If the next
+	// delay time would take the total waiting duration over MaxWait, then an
+	// WaitTimeExceeded error is returned. If no value is specified, Call will
+	// continue until the number of attempts is complete.
+	MaxWait time.Duration
+
 	// BackoffFunc allows the caller to provide a function that alters the
 	// delay each time through the loop. If this function is not provided the
 	// delay is the same each iteration. Alternatively a function such as
@@ -105,11 +159,12 @@ func (args *CallArgs) Validate() error {
 	if args.Delay == 0 {
 		return errors.NotValidf("missing Delay")
 	}
-	if args.Attempts == 0 {
-		return errors.NotValidf("missing Attempts")
-	}
 	if args.Clock == nil {
 		return errors.NotValidf("missing Clock")
+	}
+	// One of Attempts or MaxWait need to be specified
+	if args.Attempts == 0 && args.MaxWait == 0 {
+		return errors.NotValidf("missing Attempts or MaxWait")
 	}
 	return nil
 }
@@ -121,7 +176,8 @@ func Call(args CallArgs) error {
 	if err != nil {
 		return errors.Trace(err)
 	}
-	for i := 1; args.Attempts < 0 || i <= args.Attempts; i++ {
+	var wait time.Duration
+	for i := 1; args.Attempts <= 0 || i <= args.Attempts; i++ {
 		err = args.Func()
 		if err == nil {
 			return nil
@@ -143,15 +199,19 @@ func Call(args CallArgs) error {
 			}
 			args.Delay = delay
 		}
+		wait += args.Delay
+		if args.MaxWait > 0 && wait > args.MaxWait {
+			return errors.Wrap(err, &waitTimeExceeded{err})
+		}
 
 		// Wait for the delay, and retry
 		select {
 		case <-args.Clock.After(args.Delay):
 		case <-args.Stop:
-			return RetryStopped
+			return errors.Wrap(err, &retryStopped{err})
 		}
 	}
-	return errors.Wrap(err, &AttemptsExceeded{err})
+	return errors.Wrap(err, &attemptsExceeded{err})
 }
 
 // DoubleDelay provides a simple function that doubles the duration passed in.

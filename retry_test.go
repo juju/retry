@@ -75,7 +75,7 @@ func (*retrySuite) TestAttempts(c *gc.C) {
 		Delay:    time.Minute,
 		Clock:    clock,
 	})
-	c.Assert(errors.Cause(err), jc.Satisfies, retry.IsAttemptsExceeded)
+	c.Assert(err, jc.Satisfies, retry.IsAttemptsExceeded)
 	// We delay between attempts, and don't delay after the last one.
 	c.Assert(clock.delays, jc.DeepEquals, []time.Duration{
 		time.Minute,
@@ -94,10 +94,8 @@ func (*retrySuite) TestAttemptsExceededError(c *gc.C) {
 		Clock:    clock,
 	})
 	c.Assert(err, gc.ErrorMatches, `attempt count exceeded: bah`)
-	cause := errors.Cause(err)
-	c.Assert(cause, jc.Satisfies, retry.IsAttemptsExceeded)
-	retryError, _ := cause.(*retry.AttemptsExceeded)
-	c.Assert(retryError.LastError, gc.Equals, funcErr)
+	c.Assert(err, jc.Satisfies, retry.IsAttemptsExceeded)
+	c.Assert(retry.LastError(err), gc.Equals, funcErr)
 }
 
 func (*retrySuite) TestFatalErrorsNotRetried(c *gc.C) {
@@ -123,7 +121,7 @@ func (*retrySuite) TestBackoffFactor(c *gc.C) {
 		Delay:       time.Minute,
 		BackoffFunc: retry.DoubleDelay,
 	})
-	c.Assert(errors.Cause(err), jc.Satisfies, retry.IsAttemptsExceeded)
+	c.Assert(err, jc.Satisfies, retry.IsAttemptsExceeded)
 	c.Assert(clock.delays, jc.DeepEquals, []time.Duration{
 		time.Minute,
 		time.Minute * 2,
@@ -149,7 +147,7 @@ func (*retrySuite) TestStopChannel(c *gc.C) {
 		Clock:    clock,
 		Stop:     stop,
 	})
-	c.Assert(errors.Cause(err), jc.Satisfies, retry.IsRetryStopped)
+	c.Assert(err, jc.Satisfies, retry.IsRetryStopped)
 	c.Assert(clock.delays, gc.HasLen, 3)
 }
 
@@ -172,7 +170,7 @@ func (*retrySuite) TestNotifyFunc(c *gc.C) {
 		Delay:    time.Minute,
 		Clock:    clock,
 	})
-	c.Assert(errors.Cause(err), jc.Satisfies, retry.IsAttemptsExceeded)
+	c.Assert(err, jc.Satisfies, retry.IsAttemptsExceeded)
 	c.Assert(clock.delays, gc.HasLen, 2)
 	c.Assert(funcErrors, jc.DeepEquals, []error{funcErr, funcErr, funcErr})
 	c.Assert(attempts, jc.DeepEquals, []int{1, 2, 3})
@@ -196,8 +194,45 @@ func (*retrySuite) TestInfiniteRetries(c *gc.C) {
 		Clock:    clock,
 		Stop:     stop,
 	})
-	c.Assert(errors.Cause(err), jc.Satisfies, retry.IsRetryStopped)
+	c.Assert(err, jc.Satisfies, retry.IsRetryStopped)
 	c.Assert(clock.delays, gc.HasLen, count)
+}
+
+func (*retrySuite) TestMaxWait(c *gc.C) {
+	clock := &mockClock{}
+	err := retry.Call(retry.CallArgs{
+		Func:    func() error { return errors.New("bah") },
+		Delay:   time.Minute,
+		MaxWait: 5 * time.Minute,
+		Clock:   clock,
+	})
+	c.Assert(err, jc.Satisfies, retry.IsWaitTimeExceeded)
+	c.Assert(clock.delays, jc.DeepEquals, []time.Duration{
+		time.Minute,
+		time.Minute,
+		time.Minute,
+		time.Minute,
+		time.Minute,
+	})
+}
+
+func (*retrySuite) TestMaxWaitDoubling(c *gc.C) {
+	clock := &mockClock{}
+	err := retry.Call(retry.CallArgs{
+		Func:        func() error { return errors.New("bah") },
+		Delay:       time.Minute,
+		MaxWait:     10 * time.Minute,
+		BackoffFunc: retry.DoubleDelay,
+		Clock:       clock,
+	})
+	c.Assert(err, jc.Satisfies, retry.IsWaitTimeExceeded)
+	// Stops after seven minutes, because the next wait time
+	// would take it to 15 minutes.
+	c.Assert(clock.delays, jc.DeepEquals, []time.Duration{
+		time.Minute,
+		2 * time.Minute,
+		4 * time.Minute,
+	})
 }
 
 func (*retrySuite) TestMaxDelay(c *gc.C) {
@@ -210,7 +245,7 @@ func (*retrySuite) TestMaxDelay(c *gc.C) {
 		BackoffFunc: retry.DoubleDelay,
 		Clock:       clock,
 	})
-	c.Assert(errors.Cause(err), jc.Satisfies, retry.IsAttemptsExceeded)
+	c.Assert(err, jc.Satisfies, retry.IsAttemptsExceeded)
 	c.Assert(clock.delays, jc.DeepEquals, []time.Duration{
 		time.Minute,
 		2 * time.Minute,
@@ -232,7 +267,7 @@ func (*retrySuite) TestWithWallClock(c *gc.C) {
 		Delay:    time.Microsecond,
 		Clock:    clock.WallClock,
 	})
-	c.Assert(errors.Cause(err), jc.Satisfies, retry.IsAttemptsExceeded)
+	c.Assert(err, jc.Satisfies, retry.IsAttemptsExceeded)
 	c.Assert(attempts, jc.DeepEquals, []int{1, 2, 3, 4, 5})
 }
 
@@ -253,7 +288,7 @@ func (*retrySuite) TestMissingAttemptsNotValid(c *gc.C) {
 		Clock: clock.WallClock,
 	})
 	c.Check(err, jc.Satisfies, errors.IsNotValid)
-	c.Check(err, gc.ErrorMatches, `missing Attempts not valid`)
+	c.Check(err, gc.ErrorMatches, `missing Attempts or MaxWait not valid`)
 }
 
 func (*retrySuite) TestMissingDelayNotValid(c *gc.C) {
