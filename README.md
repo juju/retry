@@ -171,8 +171,8 @@ function finishing due to the total waiting duration exceeding the specified
 func LastError(err error) error
 ```
 LastError retrieves the last error returned from `Func` before iteration
-was terminated due to the maximum attempt count or maximum wait time being
-exceeded, or the stop channel being closed.
+was terminated due to the attempt count being exceeded, the maximum wait
+time being exceeded, or the stop channel being closed.
 
 
 
