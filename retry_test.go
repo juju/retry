@@ -27,9 +27,6 @@ type mockClock struct {
 }
 
 func (mock *mockClock) Now() time.Time {
-	if mock.now.IsZero() {
-		mock.now = time.Now()
-	}
 	return mock.now
 }
 
