@@ -22,15 +22,20 @@ type retrySuite struct {
 var _ = gc.Suite(&retrySuite{})
 
 type mockClock struct {
+	now    time.Time
 	delays []time.Duration
 }
 
-func (*mockClock) Now() time.Time {
-	return time.Now()
+func (mock *mockClock) Now() time.Time {
+	if mock.now.IsZero() {
+		mock.now = time.Now()
+	}
+	return mock.now
 }
 
 func (mock *mockClock) After(wait time.Duration) <-chan time.Time {
 	mock.delays = append(mock.delays, wait)
+	mock.now = mock.now.Add(wait)
 	return time.After(time.Microsecond)
 }
 
@@ -198,15 +203,15 @@ func (*retrySuite) TestInfiniteRetries(c *gc.C) {
 	c.Assert(clock.delays, gc.HasLen, count)
 }
 
-func (*retrySuite) TestMaxWait(c *gc.C) {
+func (*retrySuite) TestMaxDuration(c *gc.C) {
 	clock := &mockClock{}
 	err := retry.Call(retry.CallArgs{
-		Func:    func() error { return errors.New("bah") },
-		Delay:   time.Minute,
-		MaxWait: 5 * time.Minute,
-		Clock:   clock,
+		Func:        func() error { return errors.New("bah") },
+		Delay:       time.Minute,
+		MaxDuration: 5 * time.Minute,
+		Clock:       clock,
 	})
-	c.Assert(err, jc.Satisfies, retry.IsWaitTimeExceeded)
+	c.Assert(err, jc.Satisfies, retry.IsDurationExceeded)
 	c.Assert(clock.delays, jc.DeepEquals, []time.Duration{
 		time.Minute,
 		time.Minute,
@@ -216,16 +221,16 @@ func (*retrySuite) TestMaxWait(c *gc.C) {
 	})
 }
 
-func (*retrySuite) TestMaxWaitDoubling(c *gc.C) {
+func (*retrySuite) TestMaxDurationDoubling(c *gc.C) {
 	clock := &mockClock{}
 	err := retry.Call(retry.CallArgs{
 		Func:        func() error { return errors.New("bah") },
 		Delay:       time.Minute,
-		MaxWait:     10 * time.Minute,
+		MaxDuration: 10 * time.Minute,
 		BackoffFunc: retry.DoubleDelay,
 		Clock:       clock,
 	})
-	c.Assert(err, jc.Satisfies, retry.IsWaitTimeExceeded)
+	c.Assert(err, jc.Satisfies, retry.IsDurationExceeded)
 	// Stops after seven minutes, because the next wait time
 	// would take it to 15 minutes.
 	c.Assert(clock.delays, jc.DeepEquals, []time.Duration{
@@ -288,7 +293,7 @@ func (*retrySuite) TestMissingAttemptsNotValid(c *gc.C) {
 		Clock: clock.WallClock,
 	})
 	c.Check(err, jc.Satisfies, errors.IsNotValid)
-	c.Check(err, gc.ErrorMatches, `missing Attempts or MaxWait not valid`)
+	c.Check(err, gc.ErrorMatches, `missing Attempts or MaxDuration not valid`)
 }
 
 func (*retrySuite) TestMissingDelayNotValid(c *gc.C) {

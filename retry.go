@@ -41,22 +41,22 @@ func (e *attemptsExceeded) Error() string {
 	return fmt.Sprintf("attempt count exceeded: %s", e.lastError)
 }
 
-// waitTimeExceeded is the error that is returned when the total time that the
-// `Call` function would wait exceeds the `MaxWait` specified. The last error
-// returned from the function being retried is available as the LastError
-// attribute.
-type waitTimeExceeded struct {
+// durationExceeded is the error that is returned when the total time that the
+// `Call` function would have executed exceeds the `MaxDuration` specified.
+// The last error returned from the function being retried is available as the
+// LastError attribute.
+type durationExceeded struct {
 	lastError error
 }
 
 // Error provides the implementation for the error interface method.
-func (e *waitTimeExceeded) Error() string {
-	return fmt.Sprintf("max wait time exceeded: %s", e.lastError)
+func (e *durationExceeded) Error() string {
+	return fmt.Sprintf("max duration exceeded: %s", e.lastError)
 }
 
 // LastError retrieves the last error returned from `Func` before iteration
-// was terminated due to the attempt count being exceeded, the maximum wait
-// time being exceeded, or the stop channel being closed.
+// was terminated due to the attempt count being exceeded, the maximum
+// duration being exceeded, or the stop channel being closed.
 func LastError(err error) error {
 	cause := errors.Cause(err)
 	switch err := cause.(type) {
@@ -64,7 +64,7 @@ func LastError(err error) error {
 		return err.lastError
 	case *retryStopped:
 		return err.lastError
-	case *waitTimeExceeded:
+	case *durationExceeded:
 		return err.lastError
 	}
 	return errors.Errorf("unexpected error type: %T, %s", cause, cause)
@@ -78,12 +78,12 @@ func IsAttemptsExceeded(err error) bool {
 	return ok
 }
 
-// IsWaitTimeExceeded returns true if the error is the result of the `Call`
-// function finishing due to the total waiting duration exceeding the specified
-// `MaxWait` value.
-func IsWaitTimeExceeded(err error) bool {
+// IsDurationExceeded returns true if the error is the result of the `Call`
+// function finishing due to the total duration exceeding the specified
+// `MaxDuration` value.
+func IsDurationExceeded(err error) bool {
 	cause := errors.Cause(err)
-	_, ok := cause.(*waitTimeExceeded)
+	_, ok := cause.(*durationExceeded)
 	return ok
 }
 
@@ -123,12 +123,13 @@ type CallArgs struct {
 	// value is specified there is no maximum delay.
 	MaxDelay time.Duration
 
-	// MaxWait specifies the maximum time the Call function should wait. The
-	// wait time is the summation of the delays over the attempts. If the next
-	// delay time would take the total waiting duration over MaxWait, then an
-	// WaitTimeExceeded error is returned. If no value is specified, Call will
-	// continue until the number of attempts is complete.
-	MaxWait time.Duration
+	// MaxDuration specifies the maximum time the `Call` function should spend
+	// iterating over `Func`. The duration is calculated from the start of the
+	// `Call` function.  If the next delay time would take the total duration
+	// of the call over MaxDuration, then a DurationExceeded error is
+	// returned. If no value is specified, Call will continue until the number
+	// of attempts is complete.
+	MaxDuration time.Duration
 
 	// BackoffFunc allows the caller to provide a function that alters the
 	// delay each time through the loop. If this function is not provided the
@@ -162,9 +163,9 @@ func (args *CallArgs) Validate() error {
 	if args.Clock == nil {
 		return errors.NotValidf("missing Clock")
 	}
-	// One of Attempts or MaxWait need to be specified
-	if args.Attempts == 0 && args.MaxWait == 0 {
-		return errors.NotValidf("missing Attempts or MaxWait")
+	// One of Attempts or MaxDuration need to be specified
+	if args.Attempts == 0 && args.MaxDuration == 0 {
+		return errors.NotValidf("missing Attempts or MaxDuration")
 	}
 	return nil
 }
@@ -176,7 +177,7 @@ func Call(args CallArgs) error {
 	if err != nil {
 		return errors.Trace(err)
 	}
-	var wait time.Duration
+	start := args.Clock.Now()
 	for i := 1; args.Attempts <= 0 || i <= args.Attempts; i++ {
 		err = args.Func()
 		if err == nil {
@@ -199,9 +200,9 @@ func Call(args CallArgs) error {
 			}
 			args.Delay = delay
 		}
-		wait += args.Delay
-		if args.MaxWait > 0 && wait > args.MaxWait {
-			return errors.Wrap(err, &waitTimeExceeded{err})
+		elapsedTime := args.Clock.Now().Sub(start)
+		if args.MaxDuration > 0 && (elapsedTime+args.Delay) > args.MaxDuration {
+			return errors.Wrap(err, &durationExceeded{err})
 		}
 
 		// Wait for the delay, and retry
