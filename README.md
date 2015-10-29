@@ -149,6 +149,15 @@ IsAttemptsExceeded returns true if the error is the result of the `Call`
 function finishing due to hitting the requested number of `Attempts`.
 
 
+## func IsDurationExceeded
+``` go
+func IsDurationExceeded(err error) bool
+```
+IsDurationExceeded returns true if the error is the result of the `Call`
+function finishing due to the total duration exceeding the specified
+`MaxDuration` value.
+
+
 ## func IsRetryStopped
 ``` go
 func IsRetryStopped(err error) bool
@@ -157,22 +166,13 @@ IsRetryStopped returns true if the error is the result of the `Call`
 function finishing due to the stop channel being closed.
 
 
-## func IsWaitTimeExceeded
-``` go
-func IsWaitTimeExceeded(err error) bool
-```
-IsWaitTimeExceeded returns true if the error is the result of the `Call`
-function finishing due to the total waiting duration exceeding the specified
-`MaxWait` value.
-
-
 ## func LastError
 ``` go
 func LastError(err error) error
 ```
 LastError retrieves the last error returned from `Func` before iteration
-was terminated due to the attempt count being exceeded, the maximum wait
-time being exceeded, or the stop channel being closed.
+was terminated due to the attempt count being exceeded, the maximum
+duration being exceeded, or the stop channel being closed.
 
 
 
@@ -204,12 +204,13 @@ type CallArgs struct {
     // value is specified there is no maximum delay.
     MaxDelay time.Duration
 
-    // MaxWait specifies the maximum time the Call function should wait. The
-    // wait time is the summation of the delays over the attempts. If the next
-    // delay time would take the total waiting duration over MaxWait, then an
-    // WaitTimeExceeded error is returned. If no value is specified, Call will
-    // continue until the number of attempts is complete.
-    MaxWait time.Duration
+    // MaxDuration specifies the maximum time the `Call` function should spend
+    // iterating over `Func`. The duration is calculated from the start of the
+    // `Call` function.  If the next delay time would take the total duration
+    // of the call over MaxDuration, then a DurationExceeded error is
+    // returned. If no value is specified, Call will continue until the number
+    // of attempts is complete.
+    MaxDuration time.Duration
 
     // BackoffFunc allows the caller to provide a function that alters the
     // delay each time through the loop. If this function is not provided the
