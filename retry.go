@@ -8,7 +8,6 @@ import (
 	"time"
 
 	"github.com/juju/errors"
-	"github.com/juju/utils/clock"
 )
 
 const (
@@ -142,7 +141,7 @@ type CallArgs struct {
 	// Clock provides the mechanism for waiting. Normal program execution is
 	// expected to use something like clock.WallClock, and tests can override
 	// this to not actually sleep in tests.
-	Clock clock.Clock
+	Clock Clock
 
 	// Stop is a channel that can be used to indicate that the waiting should
 	// be interrupted. If Stop is nil, then the Call function cannot be interrupted.
