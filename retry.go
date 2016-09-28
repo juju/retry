@@ -11,12 +11,12 @@ import (
 )
 
 const (
-	// UnlimitedAttempts can be used as a value for `Attempts` to clearly
+	// UnlimitedAttempts can be used as a value for Attempts to clearly
 	// show to the reader that there is no limit to the number of attempts.
 	UnlimitedAttempts = -1
 )
 
-// retryStopped is the error that is returned from the `Call` function
+// retryStopped is the error that is returned from the Call function
 // when the stop channel has been closed.
 type retryStopped struct {
 	lastError error
@@ -41,7 +41,7 @@ func (e *attemptsExceeded) Error() string {
 }
 
 // durationExceeded is the error that is returned when the total time that the
-// `Call` function would have executed exceeds the `MaxDuration` specified.
+// Call function would have executed exceeds the MaxDuration specified.
 // The last error returned from the function being retried is available as the
 // LastError attribute.
 type durationExceeded struct {
@@ -53,7 +53,7 @@ func (e *durationExceeded) Error() string {
 	return fmt.Sprintf("max duration exceeded: %s", e.lastError)
 }
 
-// LastError retrieves the last error returned from `Func` before iteration
+// LastError retrieves the last error returned from Func before iteration
 // was terminated due to the attempt count being exceeded, the maximum
 // duration being exceeded, or the stop channel being closed.
 func LastError(err error) error {
@@ -69,24 +69,24 @@ func LastError(err error) error {
 	return errors.Errorf("unexpected error type: %T, %s", cause, cause)
 }
 
-// IsAttemptsExceeded returns true if the error is the result of the `Call`
-// function finishing due to hitting the requested number of `Attempts`.
+// IsAttemptsExceeded returns true if the error is the result of the Call
+// function finishing due to hitting the requested number of Attempts.
 func IsAttemptsExceeded(err error) bool {
 	cause := errors.Cause(err)
 	_, ok := cause.(*attemptsExceeded)
 	return ok
 }
 
-// IsDurationExceeded returns true if the error is the result of the `Call`
+// IsDurationExceeded returns true if the error is the result of the Call
 // function finishing due to the total duration exceeding the specified
-// `MaxDuration` value.
+// MaxDuration value.
 func IsDurationExceeded(err error) bool {
 	cause := errors.Cause(err)
 	_, ok := cause.(*durationExceeded)
 	return ok
 }
 
-// IsRetryStopped returns true if the error is the result of the `Call`
+// IsRetryStopped returns true if the error is the result of the Call
 // function finishing due to the stop channel being closed.
 func IsRetryStopped(err error) bool {
 	cause := errors.Cause(err)
@@ -101,7 +101,7 @@ type CallArgs struct {
 	Func func() error
 
 	// IsFatalError is a function that, if set, will be called for every non-
-	// nil error result from `Func`. If `IsFatalError` returns true, the error
+	// nil error result from Func. If IsFatalError returns true, the error
 	// is immediately returned breaking out from any further retries.
 	IsFatalError func(error) bool
 
@@ -111,8 +111,8 @@ type CallArgs struct {
 	NotifyFunc func(lastError error, attempt int)
 
 	// Attempts specifies the number of times Func should be retried before
-	// giving up and returning the `AttemptsExceeded` error. If a negative
-	// value is specified, the `Call` will retry forever.
+	// giving up and returning the AttemptsExceeded error. If a negative
+	// value is specified, the Call will retry forever.
 	Attempts int
 
 	// Delay specifies how long to wait between retries.
@@ -122,9 +122,9 @@ type CallArgs struct {
 	// value is specified there is no maximum delay.
 	MaxDelay time.Duration
 
-	// MaxDuration specifies the maximum time the `Call` function should spend
-	// iterating over `Func`. The duration is calculated from the start of the
-	// `Call` function.  If the next delay time would take the total duration
+	// MaxDuration specifies the maximum time the Call function should spend
+	// iterating over Func. The duration is calculated from the start of the
+	// Call function.  If the next delay time would take the total duration
 	// of the call over MaxDuration, then a DurationExceeded error is
 	// returned. If no value is specified, Call will continue until the number
 	// of attempts is complete.
@@ -133,7 +133,7 @@ type CallArgs struct {
 	// BackoffFunc allows the caller to provide a function that alters the
 	// delay each time through the loop. If this function is not provided the
 	// delay is the same each iteration. Alternatively a function such as
-	// `retry.DoubleDelay` can be used that will provide an exponential
+	// retry.DoubleDelay can be used that will provide an exponential
 	// backoff. The first time this function is called attempt is 1, the
 	// second time, attempt is 2 and so on.
 	BackoffFunc func(delay time.Duration, attempt int) time.Duration
@@ -215,7 +215,7 @@ func Call(args CallArgs) error {
 }
 
 // DoubleDelay provides a simple function that doubles the duration passed in.
-// This can then be easily used as the `BackoffFunc` in the `CallArgs`
+// This can then be easily used as the BackoffFunc in the CallArgs
 // structure.
 func DoubleDelay(delay time.Duration, attempt int) time.Duration {
 	if attempt == 1 {
