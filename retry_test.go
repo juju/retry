@@ -312,3 +312,43 @@ func (*retrySuite) TestMissingClockNotValid(c *gc.C) {
 	c.Check(err, jc.Satisfies, errors.IsNotValid)
 	c.Check(err, gc.ErrorMatches, `missing Clock not valid`)
 }
+
+type expBackoffSuite struct {
+	testing.LoggingSuite
+}
+
+var _ = gc.Suite(&expBackoffSuite{})
+
+func (*expBackoffSuite) TestExpBackoffWithoutJitter(c *gc.C) {
+	backoffFunc := retry.ExpBackoff(200*time.Millisecond, 2*time.Second, 2.0, false)
+	expDurations := []time.Duration{
+		200 * time.Millisecond,
+		400 * time.Millisecond,
+		800 * time.Millisecond,
+		1600 * time.Millisecond,
+		2000 * time.Millisecond, // capped to maxDelay
+	}
+
+	for attempt, expDuration := range expDurations {
+		got := backoffFunc(0, attempt)
+		c.Assert(got, gc.Equals, expDuration, gc.Commentf("unexpected duration for attempt %d", attempt))
+	}
+}
+
+func (*expBackoffSuite) TestExpBackoffWithtJitter(c *gc.C) {
+	minDelay := 200 * time.Millisecond
+	backoffFunc := retry.ExpBackoff(minDelay, 2*time.Second, 2.0, true)
+	maxDurations := []time.Duration{
+		200 * time.Millisecond,
+		400 * time.Millisecond,
+		800 * time.Millisecond,
+		1600 * time.Millisecond,
+		2000 * time.Millisecond, // capped to maxDelay
+	}
+
+	for attempt, maxDuration := range maxDurations {
+		got := backoffFunc(0, attempt)
+		c.Assert(got, jc.GreaterThan, minDelay-1, gc.Commentf("expected jittered duration for attempt %d to be in the [%s, %s] range; got %s", attempt, minDelay, maxDuration, got))
+		c.Assert(got, jc.LessThan, maxDuration+1, gc.Commentf("expected jittered duration for attempt %d to be in the [%s, %s] range; got %s", attempt, minDelay, maxDuration, got))
+	}
+}
