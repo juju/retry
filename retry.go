@@ -5,6 +5,8 @@ package retry
 
 import (
 	"fmt"
+	"math"
+	"math/rand"
 	"time"
 
 	"github.com/juju/errors"
@@ -222,4 +224,35 @@ func DoubleDelay(delay time.Duration, attempt int) time.Duration {
 		return delay
 	}
 	return delay * 2
+}
+
+// ExpBackoff returns a function a which generates time.Duration values using
+// an exponential back-off algorithm with the specified parameters. The
+// returned value can then be easily used as the BackoffFunc in the CallArgs
+// structure.
+//
+// The next delay value is calculated using the following formula:
+//   newDelay = min(minDelay * exp^attempt, maxDelay)
+//
+// If applyJitter is set to true, the function will randomly select and return
+// back a value in the [minDelay, newDelay] range.
+func ExpBackoff(minDelay, maxDelay time.Duration, exp float64, applyJitter bool) func(time.Duration, int) time.Duration {
+	minDelayF := float64(minDelay)
+	maxDelayF := float64(maxDelay)
+	return func(_ time.Duration, attempt int) time.Duration {
+		newDelay := minDelayF * math.Pow(exp, float64(attempt))
+		if newDelay > maxDelayF {
+			newDelay = maxDelayF
+		}
+
+		// Return a random value in the [minDelay, newDelay) range.
+		if applyJitter {
+			newDelay = rand.Float64() * newDelay
+			if newDelay < minDelayF {
+				newDelay = minDelayF
+			}
+		}
+
+		return time.Duration(newDelay).Round(time.Millisecond)
+	}
 }

@@ -140,6 +140,19 @@ DoubleDelay provides a simple function that doubles the duration passed in.
 This can then be easily used as the `BackoffFunc` in the `CallArgs`
 structure.
 
+## func ExpBackoff
+``` go
+func ExpBackoff(minDelay, maxDelay time.Duration, exp float64, applyJitter bool) func(time.Duration, int) time.Duration {
+```
+ExpBackoff returns a function a which generates time.Duration values using an
+exponential back-off algorithm with the specified parameters. The returned value
+can then be easily used as the `BackoffFunc` in the `CallArgs` structure.
+
+The next delay value is calculated using the following formula:
+  `newDelay = min(minDelay * exp^attempt, maxDelay)`
+
+If `applyJitter` is set to `true`, the function will randomly select and return
+back a value in the `[minDelay, newDelay]` range.
 
 ## func IsAttemptsExceeded
 ``` go
