@@ -165,8 +165,8 @@ func (args *CallArgs) Validate() error {
 		return errors.NotValidf("missing Clock")
 	}
 	// One of Attempts or MaxDuration need to be specified
-	if args.Attempts == 0 && args.MaxDuration == 0 {
-		return errors.NotValidf("missing Attempts or MaxDuration")
+	if args.Attempts == 0 && args.MaxDuration == 0 && args.Stop == nil {
+		return errors.NotValidf("missing all of Attempts, MaxDuration or Stop")
 	}
 	return nil
 }
@@ -178,42 +178,32 @@ func Call(args CallArgs) error {
 	if err != nil {
 		return errors.Trace(err)
 	}
-	start := args.Clock.Now()
-	for i := 1; args.Attempts <= 0 || i <= args.Attempts; i++ {
+
+	spec := LoopSpec{
+		Attempts:    args.Attempts,
+		Delay:       args.Delay,
+		MaxDelay:    args.MaxDelay,
+		MaxDuration: args.MaxDuration,
+		BackoffFunc: args.BackoffFunc,
+		Clock:       args.Clock,
+		Stop:        args.Stop,
+	}
+
+	loop := Loop(spec)
+	for loop.Next(err) {
 		err = args.Func()
-		if err == nil {
-			return nil
-		}
 		if args.IsFatalError != nil && args.IsFatalError(err) {
-			return errors.Trace(err)
+			break
 		}
 		if args.NotifyFunc != nil {
-			args.NotifyFunc(err, i)
-		}
-		if i == args.Attempts && args.Attempts > 0 {
-			break // don't wait before returning the error
-		}
-
-		if args.BackoffFunc != nil {
-			delay := args.BackoffFunc(args.Delay, i)
-			if delay > args.MaxDelay && args.MaxDelay > 0 {
-				delay = args.MaxDelay
-			}
-			args.Delay = delay
-		}
-		elapsedTime := args.Clock.Now().Sub(start)
-		if args.MaxDuration > 0 && (elapsedTime+args.Delay) > args.MaxDuration {
-			return errors.Wrap(err, &durationExceeded{err})
-		}
-
-		// Wait for the delay, and retry
-		select {
-		case <-args.Clock.After(args.Delay):
-		case <-args.Stop:
-			return errors.Wrap(err, &retryStopped{err})
+			args.NotifyFunc(err, loop.Count())
 		}
 	}
-	return errors.Wrap(err, &attemptsExceeded{err})
+
+	if loop.Error() != nil {
+		return errors.Trace(loop.Error())
+	}
+	return errors.Trace(err)
 }
 
 // DoubleDelay provides a simple function that doubles the duration passed in.

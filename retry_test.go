@@ -290,7 +290,7 @@ func (*retrySuite) TestMissingAttemptsNotValid(c *gc.C) {
 		Clock: clock.WallClock,
 	})
 	c.Check(err, jc.Satisfies, errors.IsNotValid)
-	c.Check(err, gc.ErrorMatches, `missing Attempts or MaxDuration not valid`)
+	c.Check(err, gc.ErrorMatches, `missing all of Attempts, MaxDuration or Stop not valid`)
 }
 
 func (*retrySuite) TestMissingDelayNotValid(c *gc.C) {
